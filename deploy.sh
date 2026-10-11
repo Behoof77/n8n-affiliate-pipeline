@@ -44,9 +44,14 @@ fi
 echo "    using: $COMPOSE"
 
 echo "==> [4/9] DuckDNS update + 6h refresh cron"
-curl -fsS "https://duckdns.org/update?domains=${DUCKDNS_NAME}&token=${DUCKDNS_TOKEN}&ip=" || echo "    DuckDNS update returned non-zero (check token)"
+DUCK_URL="https://duckdns.org/update?domains=${DUCKDNS_NAME}&token=${DUCKDNS_TOKEN}&ip="
+DUCK_RESP="$(curl -fsSL --max-time 15 "$DUCK_URL" || true)"
+echo "    duckdns response: ${DUCK_RESP}"
+if [ "$DUCK_RESP" != "OK" ]; then
+  echo "    WARNING: DuckDNS update did not return OK" >&2
+fi
 ( crontab -l 2>/dev/null | grep -v duckdns || true
-  echo "0 */6 * * * curl -fsS \"https://duckdns.org/update?domains=${DUCKDNS_NAME}&token=${DUCKDNS_TOKEN}&ip=\" >/dev/null 2>&1 || true"
+  echo "0 */6 * * * curl -fsSL \"${DUCK_URL}\" >/dev/null 2>&1 || true"
 ) | crontab -
 
 echo "==> [5/9] Prepare dirs + bootstrap HTTP nginx site (no cert yet)"
