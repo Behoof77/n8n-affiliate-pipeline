@@ -1,0 +1,79 @@
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: n8n
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5678:5678"
+    environment:
+      - N8N_HOST=${N8N_DOMAIN}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=https
+      - N8N_WEBHOOK_URL=https://${N8N_DOMAIN}/
+      - N8N_PROXY_HOPS=1
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_SECURE_COOKIE=true
+      - GENERIC_TIMEZONE=Asia/Kolkata
+      - TZ=Asia/Kolkata
+      - RENDERER_ORIGIN=http://video-renderer:8000
+      - SCRAPER_ORIGIN=http://meesho-scraper:5000
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./shared:/data/shared
+    networks:
+      - pipeline
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:5678/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  video-renderer:
+    build: ./renderer-service
+    container_name: video-renderer
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8010:8000"
+    environment:
+      - SHARED_DIR=/data/shared
+      - PUBLIC_ORIGIN=https://${N8N_DOMAIN}
+      - RENDERER_VOICE=${RENDERER_VOICE:-hi-IN-SwaraNeural}
+      - RENDERER_STT=${RENDERER_STT:-edge}
+    volumes:
+      - ./shared:/data/shared
+    networks:
+      - pipeline
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  meesho-scraper:
+    build: ./meesho-scraper
+    container_name: meesho-scraper
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5001:5000"
+    environment:
+      - RETURN_RISK_MODE=${RETURN_RISK_MODE:-strict}
+      - MEESHO_QUERIES=${MEESHO_QUERIES:-women kurti,mobile cover,kitchen organizer}
+      - SCRAPER_TOP_N=${SCRAPER_TOP_N:-5}
+    networks:
+      - pipeline
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+networks:
+  pipeline:
+    driver: bridge
+
+volumes:
+  n8n_data:

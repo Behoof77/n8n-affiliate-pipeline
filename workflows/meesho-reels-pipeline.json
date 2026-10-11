@@ -1,0 +1,1592 @@
+{
+  "name": "Meesho Reels Pipeline",
+  "nodes": [
+    {
+      "id": "11111111-1111-4111-8111-111111111101",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -720,
+        480
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 9,
+              "triggerAtMinute": 30
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111102",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -500,
+        480
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "notify_email",
+              "value": "you@example.com",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "voice",
+              "value": "hi-IN-SwaraNeural",
+              "type": "string"
+            },
+            {
+              "id": "a3",
+              "name": "yt_privacy",
+              "value": "private",
+              "type": "string"
+            },
+            {
+              "id": "a4",
+              "name": "ig_user_id",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "a5",
+              "name": "openai_model",
+              "value": "gpt-4o-mini",
+              "type": "string"
+            },
+            {
+              "id": "a6",
+              "name": "scraper_limit",
+              "value": 5,
+              "type": "number"
+            },
+            {
+              "id": "a7",
+              "name": "public_origin",
+              "value": "__PUBLIC_ORIGIN__",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111103",
+      "name": "Init Job",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -280,
+        480
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: { job_id: 'job_' + Date.now() } }];"
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111104",
+      "name": "Fetch Trending Products",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -60,
+        480
+      ],
+      "parameters": {
+        "url": "=http://meesho-scraper:5000/trending?limit={{ $('Config').first().json.scraper_limit }}",
+        "options": {
+          "timeout": 300000
+        }
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111105",
+      "name": "Build Product Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        160,
+        480
+      ],
+      "parameters": {
+        "jsCode": "const cfg = $('Config').first().json;\nconst job_id = $('Init Job').first().json.job_id;\nconst payload = $input.first().json || {};\nlet list = [];\nif (Array.isArray(payload)) list = payload;\nelse if (Array.isArray(payload.products)) list = payload.products;\nelse if (Array.isArray(payload.items)) list = payload.items;\nif (!list.length) throw new Error('Scraper returned no products');\nconst base = $execution.resumeUrl;\nconst cards = list.map((it, i) => {\n  const name = it.title || it.name || ('Product ' + (i + 1));\n  const price = it.price || '';\n  const rating = it.rating || '';\n  const reviews = it.reviews != null ? it.reviews : (it.review_count != null ? it.review_count : '');\n  const img = (Array.isArray(it.images) && it.images[0]) || it.image || '';\n  const url = it.url || it.link || '#';\n  return '<div style=\"border:1px solid #ddd;border-radius:8px;padding:12px;margin:8px 0;font-family:sans-serif\">' +\n    '<b>#' + (i + 1) + ' ' + name + '</b><br/>Price: ' + price + ' | Rating: ' + rating + ' | Reviews: ' + reviews +\n    '<br/><a href=\"' + url + '\">Open product</a>' +\n    (img ? '<br/><img src=\"' + img + '\" width=\"120\"/>' : '') + '</div>';\n}).join('');\nconst html = '<p>Trending Meesho products for today. The FIRST product in the list will be used for the reel.</p>' +\n  cards +\n  \"<p><a href='\" + base + \"?action=approve&stage=product&job_id=\" + job_id + \"'>APPROVE</a> | \" +\n  \"<a href='\" + base + \"?action=reject&stage=product&job_id=\" + job_id + \"'>REJECT</a></p>\";\nreturn [{ json: { job_id: job_id, products: list, product: list[0], html: html } }];"
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111106",
+      "name": "Email: Product Review",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        380,
+        480
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $('Config').first().json.notify_email }}",
+        "subject": "Review products for today's reel",
+        "message": "={{ $('Build Product Email').first().json.html }}",
+        "emailType": "html",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111107",
+      "name": "Wait: Product",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        600,
+        480
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "httpMethod": "GET",
+        "options": {}
+      },
+      "webhookId": "wait-product"
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111108",
+      "name": "Parse Decision: Product",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        820,
+        480
+      ],
+      "parameters": {
+        "jsCode": "const raw = $input.first().json || {};\nconst hits = {};\nconst walk = (o) => {\n  if (!o || typeof o !== 'object') return;\n  for (const k of Object.keys(o)) {\n    const v = o[k];\n    const key = String(k).toLowerCase();\n    if (['action', 'stage', 'job_id', 'jobid'].includes(key) &&\n        (typeof v === 'string' || typeof v === 'number') && !(key in hits)) {\n      hits[key] = v;\n    }\n    if (v && typeof v === 'object') walk(v);\n  }\n};\nwalk(raw);\nlet action = String(hits.action || 'reject').toLowerCase();\nif (['approve', 'approved', 'yes', 'ok', 'accept', 'true'].includes(action)) {\n  action = 'approve';\n} else {\n  action = 'reject';\n}\nconst stage = String(hits.stage || 'unknown');\nconst job_id = hits.job_id || hits.jobid || $('Init Job').first().json.job_id;\nreturn [{ json: { action: action, stage: stage, job_id: job_id } }];"
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111109",
+      "name": "IF: Product Approved",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1040,
+        480
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-approve",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "approve",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111110",
+      "name": "Write Reel Script",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -720,
+        340
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $('Config').first().json.openai_model, temperature: 0.8, response_format: { type: 'json_object' }, messages: [  { role: 'system', content: \"You are a short-form video scriptwriter. Write a 30-45 second Hindi reel script for the given product. Return ONLY valid JSON with keys: hook (string, first 3 seconds attention grabber), scenes (array of exactly 6 objects, each with scene (number), duration (seconds, 3-6), text (Hindi narration for that scene), image_prompt (English visual description)), cta (string, closing call to action).\" },  { role: 'user', content: 'Product data: ' + JSON.stringify($('Build Product Email').first().json.product) + ' Write the reel script JSON now.' } ]}) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "name": "Parse Script",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -500,
+        340
+      ],
+      "parameters": {
+        "jsCode": "const resp = $input.first().json;\nlet parsed;\ntry {\n  parsed = JSON.parse(resp.choices[0].message.content);\n} catch (e) {\n  throw new Error('Script JSON parse failed: ' + e.message);\n}\nif (!parsed.hook || !parsed.cta || !Array.isArray(parsed.scenes) || parsed.scenes.length < 2) {\n  throw new Error('Script missing hook/cta/scenes (need at least 2 scenes)');\n}\nconst scenes = parsed.scenes.map((s, i) => ({\n  scene: i + 1,\n  duration: Math.min(60, Math.max(1, Number(s.duration) || 4)),\n  text: String(s.text || ''),\n  image_prompt: String(s.image_prompt || 'clean product advertising photo'),\n}));\nreturn [{ json: {\n  job_id: $('Init Job').first().json.job_id,\n  script: { hook: String(parsed.hook), scenes: scenes, cta: String(parsed.cta) },\n  product: $('Build Product Email').first().json.product,\n} }];"
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111112",
+      "name": "Build Script Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -280,
+        340
+      ],
+      "parameters": {
+        "jsCode": "const { job_id, script, product } = $input.first().json;\nconst base = $execution.resumeUrl;\nconst rows = script.scenes.map((s) =>\n  '<tr><td>' + s.scene + '</td><td>' + s.duration + 's</td><td>' + s.text + '</td><td>' + s.image_prompt + '</td></tr>'\n).join('');\nconst html = '<p><b>Product:</b> ' + (product.title || product.name || '') + '</p>' +\n  '<p><b>Hook:</b> ' + script.hook + '</p>' +\n  '<table border=\"1\" cellpadding=\"6\" style=\"border-collapse:collapse;font-family:sans-serif\">' +\n  '<tr><th>#</th><th>Dur</th><th>Text</th><th>Image prompt</th></tr>' + rows + '</table>' +\n  '<p><b>CTA:</b> ' + script.cta + '</p>' +\n  \"<p><a href='\" + base + \"?action=approve&stage=script&job_id=\" + job_id + \"'>APPROVE</a> | \" +\n  \"<a href='\" + base + \"?action=reject&stage=script&job_id=\" + job_id + \"'>REJECT</a></p>\";\nreturn [{ json: { job_id: job_id, html: html } }];"
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111113",
+      "name": "Email: Script Review",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -60,
+        340
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $('Config').first().json.notify_email }}",
+        "subject": "Review reel script",
+        "message": "={{ $('Build Script Email').first().json.html }}",
+        "emailType": "html",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111114",
+      "name": "Wait: Script",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        160,
+        340
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "httpMethod": "GET",
+        "options": {}
+      },
+      "webhookId": "wait-script"
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111115",
+      "name": "Parse Decision: Script",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        380,
+        340
+      ],
+      "parameters": {
+        "jsCode": "const raw = $input.first().json || {};\nconst hits = {};\nconst walk = (o) => {\n  if (!o || typeof o !== 'object') return;\n  for (const k of Object.keys(o)) {\n    const v = o[k];\n    const key = String(k).toLowerCase();\n    if (['action', 'stage', 'job_id', 'jobid'].includes(key) &&\n        (typeof v === 'string' || typeof v === 'number') && !(key in hits)) {\n      hits[key] = v;\n    }\n    if (v && typeof v === 'object') walk(v);\n  }\n};\nwalk(raw);\nlet action = String(hits.action || 'reject').toLowerCase();\nif (['approve', 'approved', 'yes', 'ok', 'accept', 'true'].includes(action)) {\n  action = 'approve';\n} else {\n  action = 'reject';\n}\nconst stage = String(hits.stage || 'unknown');\nconst job_id = hits.job_id || hits.jobid || $('Init Job').first().json.job_id;\nreturn [{ json: { action: action, stage: stage, job_id: job_id } }];"
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111116",
+      "name": "IF: Script Approved",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        600,
+        340
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-approve",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "approve",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111117",
+      "name": "Prepare Scene Images",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        200
+      ],
+      "parameters": {
+        "jsCode": "const { job_id, script, product } = $input.first().json;\nconst imgs = (product && Array.isArray(product.images)) ? product.images : [];\nconst hasProductImg = imgs.length > 0;\nconst items = [];\nfor (const s of script.scenes) {\n  if (hasProductImg && s.scene === 1) continue;\n  items.push({ json: { job_id: job_id, scene: s.scene, prompt: s.image_prompt, has_product_image: hasProductImg } });\n}\nreturn items;"
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111118",
+      "name": "Generate Scene Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -500,
+        200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/images/generations",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'dall-e-3', n: 1, size: '1024x1792', response_format: 'b64_json', prompt: $json.prompt + ' -- vertical 9:16 advertising background, bright even lighting, no text, no watermark, clean composition' }) }}",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111119",
+      "name": "Convert Images to Binary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -280,
+        200
+      ],
+      "parameters": {
+        "jsCode": "const prep = $('Prepare Scene Images').all();\nconst inputs = $input.all();\nconst out = [];\nfor (let i = 0; i < inputs.length; i++) {\n  const src = inputs[i].json || {};\n  const meta = (prep[i] && prep[i].json) || {};\n  const b64 = src.data && src.data[0] && src.data[0].b64_json;\n  if (!b64) throw new Error('Missing b64 image for scene ' + meta.scene);\n  const fileName = 'img_' + meta.job_id + '_s' + meta.scene + '.png';\n  let binary;\n  try {\n    binary = await this.helpers.prepareBinaryData(Buffer.from(b64, 'base64'), fileName, 'image/png');\n  } catch (e) {\n    binary = { data: b64, mimeType: 'image/png', fileName: fileName, fileType: 'png' };\n  }\n  if (!binary.fileName) binary.fileName = fileName;\n  if (!binary.mimeType) binary.mimeType = 'image/png';\n  out.push({ json: { job_id: meta.job_id, scene: meta.scene }, binary: binary });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111120",
+      "name": "Write Scene Files",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        200
+      ],
+      "parameters": {
+        "operation": "write",
+        "fileName": "=/data/shared/img_{{ $json.job_id }}_s{{ $json.scene }}.png",
+        "dataPropertyName": "data",
+        "options": {}
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111121",
+      "name": "Build Image Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        160,
+        200
+      ],
+      "parameters": {
+        "jsCode": "const job_id = $('Init Job').first().json.job_id;\nconst origin = $('Config').first().json.public_origin;\nconst { script, product } = $('Parse Script').first().json;\nconst imgs = (product && Array.isArray(product.images)) ? product.images : [];\nconst hasProductImg = imgs.length > 0;\nconst base = $execution.resumeUrl;\nconst parts = script.scenes.map((s) => {\n  let src;\n  if (s.scene === 1 && hasProductImg) src = imgs[0];\n  else src = origin + '/media/img_' + job_id + '_s' + s.scene + '.png';\n  return '<div style=\"margin:8px 0;font-family:sans-serif\"><b>Scene ' + s.scene + '</b> (' + s.duration + 's)<br/>' +\n    s.text + '<br/><img src=\"' + src + '\" width=\"220\"/></div>';\n}).join('');\nconst html = '<p>Generated scene images for review:</p>' + parts +\n  \"<p><a href='\" + base + \"?action=approve&stage=images&job_id=\" + job_id + \"'>APPROVE</a> | \" +\n  \"<a href='\" + base + \"?action=reject&stage=images&job_id=\" + job_id + \"'>REJECT</a></p>\";\nreturn [{ json: { job_id: job_id, html: html } }];"
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111122",
+      "name": "Email: Image Review",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        380,
+        200
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $('Config').first().json.notify_email }}",
+        "subject": "Review scene images",
+        "message": "={{ $('Build Image Email').first().json.html }}",
+        "emailType": "html",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111123",
+      "name": "Wait: Images",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        600,
+        200
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "httpMethod": "GET",
+        "options": {}
+      },
+      "webhookId": "wait-images"
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111124",
+      "name": "Parse Decision: Images",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        820,
+        200
+      ],
+      "parameters": {
+        "jsCode": "const raw = $input.first().json || {};\nconst hits = {};\nconst walk = (o) => {\n  if (!o || typeof o !== 'object') return;\n  for (const k of Object.keys(o)) {\n    const v = o[k];\n    const key = String(k).toLowerCase();\n    if (['action', 'stage', 'job_id', 'jobid'].includes(key) &&\n        (typeof v === 'string' || typeof v === 'number') && !(key in hits)) {\n      hits[key] = v;\n    }\n    if (v && typeof v === 'object') walk(v);\n  }\n};\nwalk(raw);\nlet action = String(hits.action || 'reject').toLowerCase();\nif (['approve', 'approved', 'yes', 'ok', 'accept', 'true'].includes(action)) {\n  action = 'approve';\n} else {\n  action = 'reject';\n}\nconst stage = String(hits.stage || 'unknown');\nconst job_id = hits.job_id || hits.jobid || $('Init Job').first().json.job_id;\nreturn [{ json: { action: action, stage: stage, job_id: job_id } }];"
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111125",
+      "name": "IF: Images Approved",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1040,
+        200
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-approve",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "approve",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111126",
+      "name": "Assemble Render Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        60
+      ],
+      "parameters": {
+        "jsCode": "const cfg = $('Config').first().json;\nconst job_id = $('Init Job').first().json.job_id;\nconst { script, product } = $('Parse Script').first().json;\nconst imgs = (product && Array.isArray(product.images)) ? product.images : [];\nconst hasProductImg = imgs.length > 0;\nconst scenes = script.scenes.map((s) => {\n  const o = { scene: s.scene, duration: s.duration, text: s.text };\n  if (s.scene === 1 && hasProductImg) o.image_url = imgs[0];\n  else o.image_path = 'img_' + job_id + '_s' + s.scene + '.png';\n  return o;\n});\nreturn [{ json: { job_id: job_id, scenes: scenes, voice: cfg.voice, captions: true } }];"
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111127",
+      "name": "Render Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -500,
+        60
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://video-renderer:8000/render-video",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 900000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "Renderer service"
+        }
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111128",
+      "name": "Build Video Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -280,
+        60
+      ],
+      "parameters": {
+        "jsCode": "const v = $input.first().json;\nif (v.status !== 'ok') {\n  throw new Error('Render failed: ' + JSON.stringify(v).slice(0, 400));\n}\nconst cfg = $('Config').first().json;\nconst job_id = v.job_id || $('Init Job').first().json.job_id;\nconst url = v.download_url || (cfg.public_origin + '/media/' + job_id + '.mp4');\nconst base = $execution.resumeUrl;\nconst html = '<p><b>Video ready</b> (' + (v.duration_sec || '?') + 's, ' + (v.size_bytes || '?') + ' bytes)</p>' +\n  '<p><video controls width=\"320\" src=\"' + url + '\"></video><br/><a href=\"' + url + '\">Download</a></p>' +\n  \"<p><a href='\" + base + \"?action=approve&stage=video&job_id=\" + job_id + \"'>APPROVE</a> | \" +\n  \"<a href='\" + base + \"?action=reject&stage=video&job_id=\" + job_id + \"'>REJECT</a></p>\";\nreturn [{ json: { job_id: job_id, video_url: url, video_path: v.video_path, html: html } }];"
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111129",
+      "name": "Email: Video Review",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -60,
+        60
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $('Config').first().json.notify_email }}",
+        "subject": "Review rendered reel",
+        "message": "={{ $('Build Video Email').first().json.html }}",
+        "emailType": "html",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111130",
+      "name": "Wait: Video",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        160,
+        60
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "httpMethod": "GET",
+        "options": {}
+      },
+      "webhookId": "wait-video"
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111131",
+      "name": "Parse Decision: Video",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        380,
+        60
+      ],
+      "parameters": {
+        "jsCode": "const raw = $input.first().json || {};\nconst hits = {};\nconst walk = (o) => {\n  if (!o || typeof o !== 'object') return;\n  for (const k of Object.keys(o)) {\n    const v = o[k];\n    const key = String(k).toLowerCase();\n    if (['action', 'stage', 'job_id', 'jobid'].includes(key) &&\n        (typeof v === 'string' || typeof v === 'number') && !(key in hits)) {\n      hits[key] = v;\n    }\n    if (v && typeof v === 'object') walk(v);\n  }\n};\nwalk(raw);\nlet action = String(hits.action || 'reject').toLowerCase();\nif (['approve', 'approved', 'yes', 'ok', 'accept', 'true'].includes(action)) {\n  action = 'approve';\n} else {\n  action = 'reject';\n}\nconst stage = String(hits.stage || 'unknown');\nconst job_id = hits.job_id || hits.jobid || $('Init Job').first().json.job_id;\nreturn [{ json: { action: action, stage: stage, job_id: job_id } }];"
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111132",
+      "name": "IF: Video Approved",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        600,
+        60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-approve",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "approve",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111133",
+      "name": "Generate Promo Copy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -720,
+        -60
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $('Config').first().json.openai_model, temperature: 0.7, response_format: { type: 'json_object' }, messages: [  { role: 'system', content: \"You are a social media marketing copywriter. Return ONLY valid JSON with keys: title (YouTube title, max 90 chars, English), description (2-3 sentence YouTube description), hashtags (array of 6 Instagram-style hashtags with # prefix), first_comment (one short line for the IG first comment with 2 hashtags), strategy (one sentence on the posting strategy).\" },  { role: 'user', content: 'Product: ' + JSON.stringify($('Parse Script').first().json.product) + ' Hook: ' + $('Parse Script').first().json.script.hook + ' CTA: ' + $('Parse Script').first().json.script.cta } ]}) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111134",
+      "name": "Parse Promo Copy",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -500,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "const resp = $input.first().json;\nlet promo;\ntry {\n  promo = JSON.parse(resp.choices[0].message.content);\n} catch (e) {\n  throw new Error('Promo JSON parse failed: ' + e.message);\n}\nif (!promo.title || !Array.isArray(promo.hashtags)) {\n  throw new Error('Promo missing title/hashtags');\n}\npromo.hashtags = promo.hashtags.map((h) => {\n  h = String(h).trim();\n  return h.startsWith('#') ? h : '#' + h.replace(/\\s+/g, '');\n});\npromo.description = String(promo.description || '');\npromo.first_comment = String(promo.first_comment || '');\nreturn [{ json: { promo: promo } }];"
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111135",
+      "name": "Read Video File",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        -280,
+        -60
+      ],
+      "parameters": {
+        "operation": "read",
+        "filePath": "={{ $('Render Video').first().json.video_path }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111136",
+      "name": "Upload YouTube",
+      "type": "n8n-nodes-base.youTube",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -60
+      ],
+      "parameters": {
+        "resource": "video",
+        "operation": "upload",
+        "title": "={{ $('Parse Promo Copy').first().json.promo.title.slice(0, 95) }}",
+        "description": "={{ $('Parse Promo Copy').first().json.promo.description + '\\n\\n' + $('Parse Promo Copy').first().json.promo.hashtags.join(' ') }}",
+        "privacyStatus": "={{ $('Config').first().json.yt_privacy }}",
+        "binaryPropertyName": "data",
+        "options": {}
+      },
+      "credentials": {
+        "youtubeOAuth2Api": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "YouTube account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111137",
+      "name": "Build Publish Plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        160,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "const resp = $input.first().json;\nconst promo = $('Parse Promo Copy').first().json.promo;\nconst video = $('Render Video').first().json;\nconst yt_id = resp.id || (resp.snippet && resp.snippet.resourceId && resp.snippet.resourceId.videoId) || '';\nconst html = '<p><b>YouTube:</b> ' + (yt_id ? yt_id : '(see channel)') + '</p>' +\n  '<p><b>IG caption:</b> ' + promo.description + ' ' + promo.hashtags.join(' ') + '</p>' +\n  '<p><b>First comment:</b> ' + promo.first_comment + '</p>' +\n  '<p><video controls width=\"320\" src=\"' + video.download_url + '\"></video></p>' +\n  '<p><i>YouTube upload is UNVERIFIED via API from this VM. If the upload node failed, download the video and upload manually, then APPROVE to continue with IG.</i></p>';\nconst job_id = $('Init Job').first().json.job_id;\nconst base = $execution.resumeUrl;\nconst html2 = html +\n  \"<p><a href='\" + base + \"?action=approve&stage=publish&job_id=\" + job_id + \"'>APPROVE</a> | \" +\n  \"<a href='\" + base + \"?action=reject&stage=publish&job_id=\" + job_id + \"'>REJECT</a></p>\";\nreturn [{ json: { job_id: job_id, youtube_id: yt_id, promo: promo, html: html2 } }];"
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111138",
+      "name": "Email: Publish Review",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        380,
+        -60
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $('Config').first().json.notify_email }}",
+        "subject": "Approve publish to YouTube + Instagram",
+        "message": "={{ $('Build Publish Plan').first().json.html }}",
+        "emailType": "html",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111139",
+      "name": "Wait: Publish",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        600,
+        -60
+      ],
+      "parameters": {
+        "resume": "webhook",
+        "httpMethod": "GET",
+        "options": {}
+      },
+      "webhookId": "wait-publish"
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111140",
+      "name": "Parse Decision: Publish",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        820,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "const raw = $input.first().json || {};\nconst hits = {};\nconst walk = (o) => {\n  if (!o || typeof o !== 'object') return;\n  for (const k of Object.keys(o)) {\n    const v = o[k];\n    const key = String(k).toLowerCase();\n    if (['action', 'stage', 'job_id', 'jobid'].includes(key) &&\n        (typeof v === 'string' || typeof v === 'number') && !(key in hits)) {\n      hits[key] = v;\n    }\n    if (v && typeof v === 'object') walk(v);\n  }\n};\nwalk(raw);\nlet action = String(hits.action || 'reject').toLowerCase();\nif (['approve', 'approved', 'yes', 'ok', 'accept', 'true'].includes(action)) {\n  action = 'approve';\n} else {\n  action = 'reject';\n}\nconst stage = String(hits.stage || 'unknown');\nconst job_id = hits.job_id || hits.jobid || $('Init Job').first().json.job_id;\nreturn [{ json: { action: action, stage: stage, job_id: job_id } }];"
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111141",
+      "name": "IF: Publish Approved",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1040,
+        -60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-approve",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "approve",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111142",
+      "name": "Create IG Reel Container",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1260,
+        -60
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/{{ $('Config').first().json.ig_user_id }}/media",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ media_type: 'REELS', video_url: $('Build Video Email').first().json.video_url, caption: $('Parse Promo Copy').first().json.promo.description + ' ' + $('Parse Promo Copy').first().json.promo.hashtags.join(' ') }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "Meta Graph API"
+        }
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111143",
+      "name": "Wait: IG Processing",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1480,
+        -60
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 45,
+        "unit": "seconds",
+        "options": {}
+      },
+      "webhookId": "wait-ig-processing"
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111144",
+      "name": "Publish IG Container",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1700,
+        -60
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/{{ $json.id }}/published",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ published: true }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "Meta Graph API"
+        }
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111145",
+      "name": "Post First Comment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        -60
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/{{ $json.id }}/comments",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ message: $('Parse Promo Copy').first().json.promo.first_comment }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "Meta Graph API"
+        }
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111146",
+      "name": "Set YouTube Public",
+      "type": "n8n-nodes-base.youTube",
+      "typeVersion": 1,
+      "position": [
+        2140,
+        -60
+      ],
+      "parameters": {
+        "resource": "video",
+        "operation": "update",
+        "videoId": "={{ $('Build Publish Plan').first().json.youtube_id }}",
+        "title": "={{ $('Parse Promo Copy').first().json.promo.title.slice(0, 95) }}",
+        "description": "={{ $('Parse Promo Copy').first().json.promo.description + '\\n\\n' + $('Parse Promo Copy').first().json.promo.hashtags.join(' ') }}",
+        "options": {
+          "privacyStatus": "public"
+        }
+      },
+      "credentials": {
+        "youtubeOAuth2Api": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "YouTube account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111147",
+      "name": "Final Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2360,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "const promo = $('Parse Promo Copy').first().json.promo;\nconst video = $('Build Video Email').first().json;\nconst yt = $('Build Publish Plan').first().json;\nconst html = '<p>Reel published.</p>' +\n  '<p><b>YouTube:</b> ' + (yt.youtube_id || 'manual / unavailable') + '<br/>' +\n  '<b>Video:</b> <a href=\"' + video.video_url + '\">download</a><br/>' +\n  '<b>IG caption:</b> ' + promo.description + ' ' + promo.hashtags.join(' ') + '</p>' +\n  '<p><i>Note: Set YouTube public node is best-effort. If the video is still private, set it public in YouTube Studio.</i></p>';\nreturn [{ json: { html: html } }];"
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111148",
+      "name": "Email: Published",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2580,
+        -60
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $('Config').first().json.notify_email }}",
+        "subject": "Reel published",
+        "message": "={{ $json.html }}",
+        "emailType": "html",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111149",
+      "name": "Stop: Rejected",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        -720,
+        620
+      ],
+      "parameters": {
+        "errorMessage": "Pipeline rejected by reviewer at stage: {{ $json.stage }}"
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Init Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Init Job": {
+      "main": [
+        [
+          {
+            "node": "Fetch Trending Products",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Trending Products": {
+      "main": [
+        [
+          {
+            "node": "Build Product Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Product Email": {
+      "main": [
+        [
+          {
+            "node": "Email: Product Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email: Product Review": {
+      "main": [
+        [
+          {
+            "node": "Wait: Product",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait: Product": {
+      "main": [
+        [
+          {
+            "node": "Parse Decision: Product",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Decision: Product": {
+      "main": [
+        [
+          {
+            "node": "IF: Product Approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Reel Script": {
+      "main": [
+        [
+          {
+            "node": "Parse Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Script": {
+      "main": [
+        [
+          {
+            "node": "Build Script Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Script Email": {
+      "main": [
+        [
+          {
+            "node": "Email: Script Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email: Script Review": {
+      "main": [
+        [
+          {
+            "node": "Wait: Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait: Script": {
+      "main": [
+        [
+          {
+            "node": "Parse Decision: Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Decision: Script": {
+      "main": [
+        [
+          {
+            "node": "IF: Script Approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Scene Images": {
+      "main": [
+        [
+          {
+            "node": "Generate Scene Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Scene Image": {
+      "main": [
+        [
+          {
+            "node": "Convert Images to Binary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert Images to Binary": {
+      "main": [
+        [
+          {
+            "node": "Write Scene Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Scene Files": {
+      "main": [
+        [
+          {
+            "node": "Build Image Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Image Email": {
+      "main": [
+        [
+          {
+            "node": "Email: Image Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email: Image Review": {
+      "main": [
+        [
+          {
+            "node": "Wait: Images",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait: Images": {
+      "main": [
+        [
+          {
+            "node": "Parse Decision: Images",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Decision: Images": {
+      "main": [
+        [
+          {
+            "node": "IF: Images Approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble Render Payload": {
+      "main": [
+        [
+          {
+            "node": "Render Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render Video": {
+      "main": [
+        [
+          {
+            "node": "Build Video Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Video Email": {
+      "main": [
+        [
+          {
+            "node": "Email: Video Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email: Video Review": {
+      "main": [
+        [
+          {
+            "node": "Wait: Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait: Video": {
+      "main": [
+        [
+          {
+            "node": "Parse Decision: Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Decision: Video": {
+      "main": [
+        [
+          {
+            "node": "IF: Video Approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Promo Copy": {
+      "main": [
+        [
+          {
+            "node": "Parse Promo Copy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Promo Copy": {
+      "main": [
+        [
+          {
+            "node": "Read Video File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Video File": {
+      "main": [
+        [
+          {
+            "node": "Upload YouTube",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload YouTube": {
+      "main": [
+        [
+          {
+            "node": "Build Publish Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Publish Plan": {
+      "main": [
+        [
+          {
+            "node": "Email: Publish Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email: Publish Review": {
+      "main": [
+        [
+          {
+            "node": "Wait: Publish",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait: Publish": {
+      "main": [
+        [
+          {
+            "node": "Parse Decision: Publish",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Decision: Publish": {
+      "main": [
+        [
+          {
+            "node": "IF: Publish Approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Publish Approved": {
+      "main": [
+        [
+          {
+            "node": "Create IG Reel Container",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Stop: Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create IG Reel Container",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create IG Reel Container": {
+      "main": [
+        [
+          {
+            "node": "Wait: IG Processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait: IG Processing": {
+      "main": [
+        [
+          {
+            "node": "Publish IG Container",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publish IG Container": {
+      "main": [
+        [
+          {
+            "node": "Post First Comment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post First Comment": {
+      "main": [
+        [
+          {
+            "node": "Set YouTube Public",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set YouTube Public": {
+      "main": [
+        [
+          {
+            "node": "Final Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final Summary": {
+      "main": [
+        [
+          {
+            "node": "Email: Published",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Product Approved": {
+      "main": [
+        [
+          {
+            "node": "Stop: Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Write Reel Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Script Approved": {
+      "main": [
+        [
+          {
+            "node": "Stop: Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Scene Images",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Images Approved": {
+      "main": [
+        [
+          {
+            "node": "Stop: Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Assemble Render Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Video Approved": {
+      "main": [
+        [
+          {
+            "node": "Stop: Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generate Promo Copy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "active": false
+}

@@ -1,0 +1,35 @@
+# env / secrets
+.env
+*.env
+!.env.example
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# node / n8n
+node_modules/
+
+# media outputs
+outputs/
+data/shared/
+*.mp4
+*.mp3
+*.wav
+!renderer-service/tests/fixtures/*
+
+# editors / os
+.idea/
+.vscode/
+.DS_Store
+
+# docker
+*.log
+
+# agent tooling (not part of the deliverable)
+.opencode/
+.omo/
+.codegraph/
