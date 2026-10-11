@@ -36,6 +36,8 @@ services:
     build: ./renderer-service
     container_name: video-renderer
     restart: unless-stopped
+    # Chrome (Remotion) crashes/hangs on Docker's default 64MB /dev/shm
+    shm_size: '512mb'
     ports:
       - "127.0.0.1:8010:8000"
     environment:
