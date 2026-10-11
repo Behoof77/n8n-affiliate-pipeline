@@ -12,6 +12,8 @@ venv/
 
 # node / n8n
 node_modules/
+remotion-site/out/
+remotion-site/dist/
 
 # media outputs
 outputs/

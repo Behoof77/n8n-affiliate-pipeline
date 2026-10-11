@@ -21,8 +21,8 @@ Decisions (user-locked):
   (interfaces 287-311, rendering 887-902) and `captions?: WordCaption[]`.
 - `src/lib/resolveAsset.ts` passes `http://`, `https://`, `data:` URLs through
   unmodified -> S3-hosted media works with ZERO composition changes.
-- Production validates fps=15 (local ref clone is fps=30; Dockerfile seds
-  Root.tsx lines 128/132/142). The Lambda site build MUST apply the same patch.
+- Production validates fps=15; `remotion-site/` carries the same patch baked
+  in (Root.tsx lines 128/132/142 vs the pinned SHA's fps=30).
 - Composition id `Explainer`, profile instagram_reels = 1080x1920, cuts use
   absolute seconds, captions are absolute-ms WordCaption {text,startMs,endMs}.
 
@@ -119,12 +119,15 @@ served these files publicly).
   AmazonS3FullAccess, AWSLambda_FullAccess, CloudFormationFullAccess,
   AmazonAPIGatewayAdministrator, IAM Full (CreateRole/PassRole for the Lambda
   execution role remotion provisions). Can be tightened post-bootstrap.
-- Site build script (scripts/lambda_deploy.sh, mirrors Dockerfile pattern —
-  no vendoring of OM source): clone OpenMontage@OM_SHA -> apply fps-15 sed
-  (Root.tsx 128/132/142 + grep guards) -> npm ci -> npx remotion lambda sites
-  create (capture serveUrl) -> npx remotion lambda functions deploy
-  (arm64, memory 2048, timeout ~900) -> package + deploy prep (Python) and
-  dispatch (Node) Lambdas -> create HTTP API + API key + /render route.
+- Site build script (scripts/lambda_deploy.sh): site source is the committed
+  `remotion-site/` dir (self-contained copy of OpenMontage remotion-composer
+  @ OM_SHA, production fps-15 Root.tsx patch + remotion.config.ts already
+  applied; bundle-validated via `node remotion-site/_bundle_check.cjs` →
+  BUNDLE_OK, so no clone/patch step at deploy time) -> cd remotion-site &&
+  npx remotion lambda sites create (capture serveUrl) -> npx remotion lambda
+  functions deploy (arm64, memory 2048, timeout ~900) -> package + deploy prep
+  (Python) and dispatch (Node) Lambdas -> create HTTP API + API key + /render
+  route.
 - Functions layout (new, in repo):
   lambda/prep/     (Python 3.11; handler.py ported from openmontage_backend
                     cut/caption/TTS logic; requirements: edge-tts, boto3)
