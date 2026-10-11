@@ -31,7 +31,8 @@ class OmRenderError(Exception):
 
 OM_ROOT = Path("/opt/openmontage")
 PROFILE = "instagram_reels"  # 1080x1920 via lib/media_profiles.get_profile
-REMOTION_TIMEOUT_MS = 120_000  # headless browser setup on a slow VM
+REMOTION_TIMEOUT_MS = 700_000  # subprocess = max(600, 700+60) = 760s; with ~65s
+# pre-render prep the request lands under n8n's 900s HTTP timeout on this VM.
 
 
 # --------------------------------------------------------------------------
@@ -193,8 +194,10 @@ async def render(
     raw = tmp / "om_raw.mp4"
     result = await _run_blocking(_execute_compose, edit_decisions, asset_manifest, raw)
     if not getattr(result, "success", False):
+        _kill_remotion_orphans()
         raise OmRenderError(getattr(result, "error", "unknown VideoCompose failure"))
     if not raw.is_file():
+        _kill_remotion_orphans()
         raise OmRenderError(f"remotion produced no output at {raw}")
 
     # 5) narration mux + optional music duck-mix (identical to v1 semantics)
@@ -210,6 +213,14 @@ async def render(
     if not final.is_file():
         raise OmRenderError("post-processing produced no final.mp4")
     return final
+
+
+def _kill_remotion_orphans() -> None:
+    # subprocess.run kills only the npm wrapper on timeout; the remotion node
+    # process, headless Chrome and the compositor survive as orphans and
+    # starve the ffmpeg fallback with CPU/swap contention.
+    for pat in ("chrome-headless-shell", "@remotion/compositor", "remotion render"):
+        subprocess.run(["pkill", "-f", pat], capture_output=True, timeout=10)
 
 
 def _execute_compose(

@@ -64,6 +64,10 @@ RUN cd /opt/openmontage/remotion-composer \
     && npm ci \
     && npx remotion browser ensure
 
+# Remotion defaults concurrency to cpus/2 (=1 on this 2-core VM); use both.
+RUN printf 'import {Config} from "@remotion/cli/config";\nConfig.setConcurrency(2);\n' \
+    > /opt/openmontage/remotion-composer/remotion.config.ts
+
 COPY app ./app
 
 # Runs as root: single-purpose container; Remotion's browser/npm caches live
