@@ -16,7 +16,9 @@ the v1 ffmpeg+ASS engine — never silently: the response carries "engine".
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import signal
 import subprocess
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -218,9 +220,25 @@ async def render(
 def _kill_remotion_orphans() -> None:
     # subprocess.run kills only the npm wrapper on timeout; the remotion node
     # process, headless Chrome and the compositor survive as orphans and
-    # starve the ffmpeg fallback with CPU/swap contention.
-    for pat in ("chrome-headless-shell", "@remotion/compositor", "remotion render"):
-        subprocess.run(["pkill", "-f", pat], capture_output=True, timeout=10)
+    # starve the ffmpeg fallback with CPU/swap contention. The slim image has
+    # no pkill(1), so scan /proc directly.
+    pats = ("chrome-headless-shell", "@remotion/compositor", "remotion render")
+    me = os.getpid()
+    try:
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                cmd = (entry / "cmdline").read_bytes().decode("utf-8", "replace")
+            except OSError:
+                continue
+            if int(entry.name) != me and any(p in cmd for p in pats):
+                try:
+                    os.kill(int(entry.name), signal.SIGKILL)
+                except OSError:
+                    pass
+    except Exception:
+        pass  # cleanup must never mask the original render error
 
 
 def _execute_compose(
