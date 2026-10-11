@@ -1,7 +1,10 @@
-FROM python:3.11-slim
+# Pin bookworm: playwright 1.49.1 --with-deps references ttf-unifont /
+# ttf-ubuntu-font-family, which were removed in Debian trixie.
+FROM python:3.11-slim-bookworm
 
 ENV PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 WORKDIR /srv
 
