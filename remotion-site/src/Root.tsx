@@ -140,8 +140,8 @@ export const Root: React.FC = () => {
         component={Explainer}
         durationInFrames={30 * 60}
         fps={15}
-        width={1920}
-        height={1080}
+        width={1080}
+        height={1920}
         defaultProps={{
           cuts: [],
           overlays: [],
