@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")"
+
+echo "==> [1/9] Safe cleanup (remove ~/200 and ~/404 junk only, as invoking user)"
+rm -rf "$HOME/200" "$HOME/404"
+
+if [ "$(id -u)" -ne 0 ]; then
+  exec sudo bash "$0" "$@"
+fi
+
 set -a
 # shellcheck disable=SC1091
 source .env
@@ -8,9 +16,6 @@ set +a
 N8N_DOMAIN="${N8N_DOMAIN:?N8N_DOMAIN required}"
 DUCKDNS_NAME="${DUCKDNS_NAME:?DUCKDNS_NAME required}"
 DUCKDNS_TOKEN="${DUCKDNS_TOKEN:?DUCKDNS_TOKEN required}"
-
-echo "==> [1/9] Safe cleanup (remove ~/200 and ~/404 junk only)"
-rm -rf "$HOME/200" "$HOME/404"
 
 echo "==> [2/9] Swapfile 2G (VM has <1G RAM)"
 if ! swapon --show | grep -q swapfile; then
