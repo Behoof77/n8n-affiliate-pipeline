@@ -86,8 +86,12 @@ def _validate(ed: dict[str, Any], am: dict[str, Any]) -> None:
     except ImportError:
         return
     base = OM_ROOT / "schemas" / "artifacts"
+    # `captions` is not in edit_decisions.schema.json (additionalProperties:
+    # false) but Explainer.tsx consumes props.captions directly, so we keep it
+    # in the dict sent to VideoCompose and strip it only for validation.
+    ed_for_schema = {k: v for k, v in ed.items() if k != "captions"}
     for doc, name in (
-        (ed, "edit_decisions.schema.json"),
+        (ed_for_schema, "edit_decisions.schema.json"),
         (am, "asset_manifest.schema.json"),
     ):
         schema_file = base / name
