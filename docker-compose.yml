@@ -1,6 +1,8 @@
 services:
   n8n:
-    image: docker.n8n.io/n8nio/n8n:latest
+    # Pinned to 1.x: n8n 2.42 rejects this repo's workflow JSON on
+    # `n8n import:workflow` (SQLITE_CONSTRAINT workflow_entity.id NOT NULL).
+    image: docker.n8n.io/n8nio/n8n:1.123.84
     container_name: n8n
     restart: unless-stopped
     ports:

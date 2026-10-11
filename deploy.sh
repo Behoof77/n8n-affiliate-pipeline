@@ -93,6 +93,7 @@ $COMPOSE up -d --build
 
 echo "==> [9/9] Import workflow into n8n (public_origin substituted)"
 sed "s|__PUBLIC_ORIGIN__|https://${N8N_DOMAIN}|g" workflows/meesho-reels-pipeline.json > /tmp/meesho-reels-pipeline.json
+docker cp /tmp/meesho-reels-pipeline.json n8n:/tmp/meesho-reels-pipeline.json
 for i in $(seq 1 12); do
   if docker exec n8n n8n import:workflow --input=/tmp/meesho-reels-pipeline.json; then
     echo "    workflow imported"
