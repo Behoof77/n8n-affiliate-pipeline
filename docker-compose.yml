@@ -43,6 +43,8 @@ services:
       - PUBLIC_ORIGIN=https://${N8N_DOMAIN}
       - RENDERER_VOICE=${RENDERER_VOICE:-hi-IN-SwaraNeural}
       - RENDERER_STT=${RENDERER_STT:-edge}
+      - RENDER_ENGINE=${RENDER_ENGINE:-openmontage}
+      - OM_FALLBACK=${OM_FALLBACK:-1}
     volumes:
       - ./shared:/data/shared
     networks:

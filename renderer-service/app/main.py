@@ -23,11 +23,18 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from . import captions, composer
+from . import captions, composer, openmontage_backend as om_backend
 from .tts import DEFAULT_VOICE, STT_MODE, tts_scene
 
 SHARED = Path(os.getenv("SHARED_DIR", "/data/shared")).resolve()
 PUBLIC_ORIGIN = os.getenv("PUBLIC_ORIGIN", "").rstrip("/")
+
+# Render engine: openmontage (Remotion via OpenMontage; 9:16, word captions)
+# or ffmpeg (v1 zoompan+ASS).  OM_FALLBACK=1 falls back to ffmpeg on
+# OpenMontage-side failures — the response "engine" field always reports
+# which engine produced the video (openmontage | ffmpeg | ffmpeg-fallback).
+ENGINE = os.getenv("RENDER_ENGINE", "openmontage").strip().lower()
+OM_FALLBACK = os.getenv("OM_FALLBACK", "1") == "1"
 
 MAX_SCENES = 20
 MAX_SCENE_SECONDS = 60
@@ -149,39 +156,62 @@ async def render_video(req: RenderRequest) -> dict:
         tmp = Path(tempfile.mkdtemp(prefix=f"{job_id}_", dir="/tmp"))
         try:
             voice = req.voice or DEFAULT_VOICE
-            rendered: list[str] = []
-
-            for idx, sc in enumerate(scenes):
-                image = await _resolve_image(sc, idx, req.images, tmp)
-                audio = tmp / f"scene_{idx}.mp3"
-                words, dur = await tts_scene(sc.text, str(audio), voice)
-                scene_dur = max(float(sc.duration), dur + 0.2)
-
-                ass: str | None = None
-                if req.captions and words:
-                    ass_path = tmp / f"scene_{idx}.ass"
-                    captions.build_ass(words, str(ass_path))
-                    ass = str(ass_path)
-
-                out = tmp / f"scene_{idx}.mp4"
-                await asyncio.to_thread(
-                    composer.render_scene,
-                    str(image), str(audio), ass, scene_dur, str(out),
-                    zoom_in=(idx % 2 == 0),
-                )
-                rendered.append(str(out))
-
-            joined = tmp / "joined.mp4"
-            await asyncio.to_thread(composer.concat_scenes, rendered, str(joined))
-
+            engine_used = "ffmpeg"
             final_tmp = tmp / "final.mp4"
-            if req.music_path:
-                music = _resolve_local(req.music_path, "music_path")
-                await asyncio.to_thread(
-                    composer.mix_music, str(joined), str(music), str(final_tmp)
-                )
-            else:
-                await asyncio.to_thread(composer.faststart, str(joined), str(final_tmp))
+
+            if ENGINE in ("openmontage", "om", "remotion"):
+                try:
+                    final_tmp = await om_backend.render(
+                        req, scenes, job_id, tmp,
+                        resolve_image=_resolve_image,
+                        resolve_local=_resolve_local,
+                    )
+                    engine_used = "openmontage"
+                except om_backend.OmRenderError as exc:
+                    if not OM_FALLBACK:
+                        raise HTTPException(
+                            status_code=500, detail=f"openmontage failed: {exc}"
+                        ) from exc
+                    print(
+                        f"[renderer] openmontage failed, falling back to ffmpeg: {exc}",
+                        flush=True,
+                    )
+                    final_tmp = tmp / "final.mp4"
+                    engine_used = "ffmpeg-fallback"
+
+            if engine_used != "openmontage":
+                rendered: list[str] = []
+
+                for idx, sc in enumerate(scenes):
+                    image = await _resolve_image(sc, idx, req.images, tmp)
+                    audio = tmp / f"scene_{idx}.mp3"
+                    words, dur = await tts_scene(sc.text, str(audio), voice)
+                    scene_dur = max(float(sc.duration), dur + 0.2)
+
+                    ass: str | None = None
+                    if req.captions and words:
+                        ass_path = tmp / f"scene_{idx}.ass"
+                        captions.build_ass(words, str(ass_path))
+                        ass = str(ass_path)
+
+                    out = tmp / f"scene_{idx}.mp4"
+                    await asyncio.to_thread(
+                        composer.render_scene,
+                        str(image), str(audio), ass, scene_dur, str(out),
+                        zoom_in=(idx % 2 == 0),
+                    )
+                    rendered.append(str(out))
+
+                joined = tmp / "joined.mp4"
+                await asyncio.to_thread(composer.concat_scenes, rendered, str(joined))
+
+                if req.music_path:
+                    music = _resolve_local(req.music_path, "music_path")
+                    await asyncio.to_thread(
+                        composer.mix_music, str(joined), str(music), str(final_tmp)
+                    )
+                else:
+                    await asyncio.to_thread(composer.faststart, str(joined), str(final_tmp))
 
             SHARED.mkdir(parents=True, exist_ok=True)
             final = SHARED / f"{job_id}.mp4"
@@ -195,6 +225,7 @@ async def render_video(req: RenderRequest) -> dict:
                 "download_url": f"{PUBLIC_ORIGIN}/media/{final.name}" if PUBLIC_ORIGIN else None,
                 "duration_sec": round(total, 2),
                 "size_bytes": final.stat().st_size,
+                "engine": engine_used,
             }
         except HTTPException:
             raise
