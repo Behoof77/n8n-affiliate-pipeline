@@ -68,6 +68,17 @@ RUN cd /opt/openmontage/remotion-composer \
 RUN printf 'import {Config} from "@remotion/cli/config";\nConfig.setConcurrency(2);\n' \
     > /opt/openmontage/remotion-composer/remotion.config.ts
 
+# 30fps makes an 8s/240-frame reel blow the 760s budget on this 956MB VM
+# (chrome <25% CPU each => swap-bound, not CPU-bound). Halve fps: line numbers
+# are stable because OM_SHA is pinned; greps fail the build if they drift.
+RUN sed -i \
+        -e '128s/30 \* 60/15 * 60/' \
+        -e '132s/\* 30)/\* 15)/' \
+        -e '142s/fps={30}/fps={15}/' \
+        /opt/openmontage/remotion-composer/src/Root.tsx \
+    && sed -n '142p' /opt/openmontage/remotion-composer/src/Root.tsx | grep -q 'fps={15}' \
+    && sed -n '132p' /opt/openmontage/remotion-composer/src/Root.tsx | grep -q '\* 15)'
+
 COPY app ./app
 
 # Runs as root: single-purpose container; Remotion's browser/npm caches live
